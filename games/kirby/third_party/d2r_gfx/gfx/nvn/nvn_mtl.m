@@ -5489,7 +5489,12 @@ static __unsafe_unretained NvProg *prog_get(const prog_t *cp) {   // 只在提�
         CC_SHA256_Update(&ctx,(const void *)(uintptr_t)p->sd[i].data,length);CC_SHA256_Final(md,&ctx);
         char key[65];for(unsigned j=0;j<32;j++)snprintf(key+2*j,3,"%02x",md[j]);
         // TOTK: stage from control+0x714 (0 vertex, 1 fragment, 5 compute); translation answered from the bound state.
-        int st=(int)nvn_stage;if(st!=0&&st!=1&&st!=5)MDIE("TOTK shader %s: unsupported NVN stage %u",key,nvn_stage);
+        int st=(int)nvn_stage;if(st!=0&&st!=1&&st!=5&&st!=2)MDIE("TOTK shader %s: unsupported NVN stage %u",key,nvn_stage);
+        /* Kirby: the game's one geometry shader (7debebb4, the mouthful modes' deformed Kirby: Ring, Elevator, Glider, dump
+           truck) passes each triangle through and atomically adds its face normal into a vertex buffer; its fragment shaders
+           are empty. Metal has no geometry stage and nothing translates it, so the program stays missing and its draws are
+           skipped (draw_inner) instead of stopping the game. */
+        if(st==2){o->missing|=1<<2;static int n;if(!n++)MLOG("[shader] geometry shader %.16s: no Metal geometry stage, its draws are skipped",key);continue;}
         if (getenv("TOTK_CTL_DUMP")) {   // diagnostic: the control section the game hands NVN, per shader (offline shader discovery is checked against it)
             static FILE *df; if (!df) df = fopen(getenv("TOTK_CTL_DUMP"), "a");
             if (df) { uint8_t cm[32]; char ch[65]; const uint8_t *cd = (const uint8_t *)(uintptr_t)p->sd[i].data; size_t skip = st == 5 ? 0 : 0x30;
@@ -5518,7 +5523,7 @@ static int prog_resolve(NvProg *o, int may_skip) {
     o->miss_seen = done;
     int filled = 0;
     for (int st = 0; st < 6; st++) {
-        if (!(o->missing & 1 << st)) continue;
+        if (!(o->missing & 1 << st) || st == 2) continue;   // a geometry stage is never translated (prog_get)
         NSString *variant = totk_rt_variant(o->key[st], st, o->ctl[st], o->code[st], rt_answers(st), rt_local(o->ctl[st], st), may_skip);
         if (!variant) continue;
         NvShader *sh = shader_get([variant stringByAppendingString:@"_b"], st);
